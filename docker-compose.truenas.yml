@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TrueNAS Production Compose — uses pre-built images from Docker Hub
+# This file is templated — real values are substituted by the Makefile/CI.
+#
+# Environment variables used (set in .env.make or as shell exports):
+#   DOCKER_USER     — Docker Hub username
+#   TRUENAS_HOST    — TrueNAS IP/hostname
+#   JWT_SECRET      — JWT signing secret (run: openssl rand -hex 32)
+#   JWT_REFRESH_SECRET
+#   NEWSAPI_KEY     — (optional)
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: '3.8'
+
+services:
+
+  backend:
+    image: ${DOCKER_USER}/globalnews-backend:latest
+    container_name: globalnews-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - FRONTEND_URL=http://${TRUENAS_HOST}:8080
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NEWSAPI_KEY=${NEWSAPI_KEY:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - globalnews
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    image: ${DOCKER_USER}/globalnews-frontend:latest
+    container_name: globalnews-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - globalnews
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: globalnews-redis
+    ports:
+      - "127.0.0.1:6379:6379"    # bind to localhost only — not exposed on LAN
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - /mnt/SSD/globalnews/redis-data:/data
+    networks:
+      - globalnews
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+networks:
+  globalnews:
+    driver: bridge
