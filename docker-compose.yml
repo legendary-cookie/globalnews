@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # Frontend (Nginx serving Vite build + proxying /api and /ws to backend)
+  frontend:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      args:
+        # In docker-compose, the browser talks to the nginx container on port 80.
+        # Nginx then proxies /api → backend:3001, so the Vite app just uses /api.
+        VITE_API_URL: /api
+        VITE_WS_URL: ws://localhost/ws
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - globalnews-network
+    restart: unless-stopped
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - FRONTEND_URL=http://localhost
+      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-your-super-secret-refresh-key-change-in-production}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NEWSAPI_KEY=${NEWSAPI_KEY:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - globalnews-network
+    restart: unless-stopped
+
+  # Redis Cache (optional — backend works without it)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - globalnews-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:
+
+networks:
+  globalnews-network:
+    driver: bridge
